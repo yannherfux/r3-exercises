@@ -1,0 +1,228 @@
+---
+title: "Visualize"
+author: "Yann Herrera Fuchs"
+date: "06/10/2021"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    code_folding: "show"
+  
+---
+
+# Read data
+
+```{r}
+library(here) # for easy file navigation
+library(readr)
+library(DT)
+
+# variables
+url_ac <- "https://oceanview.pfeg.noaa.gov/erddap/tabledap/cciea_AC.csv"
+# if ERDDAP server down (Error in download.file) with URL above, use this:
+#    url_ac <- "https://raw.githubusercontent.com/noaa-iea/r3-train/master/data/cciea_AC.csv"
+csv_ac <- here("data/cciea_AC.csv")
+
+# download data
+if (!file.exists(csv_ac))
+  download.file(url_ac, csv_ac)
+
+# read data
+d_ac        <- read_csv(csv_ac, col_names = F, skip = 2)
+names(d_ac) <- names(read_csv(csv_ac))
+
+# show data
+datatable(d_ac)
+```
+
+# For plotting a simple line plot of continuous data
+
+```{r}
+# Note: The data visualization ggplot cheatsheet is very helpful for this
+
+library(dplyr)
+library(ggplot2)
+
+# subset data
+d_coast <- d_ac %>% 
+  # select columns
+  select(time, total_fisheries_revenue_coastwide) %>% 
+  # filter rows
+  filter(!is.na(total_fisheries_revenue_coastwide))
+datatable(d_coast)
+
+# ggplot object
+p_coast <- d_coast %>% 
+  # setup aesthetics
+  ggplot(aes(x = time, y = total_fisheries_revenue_coastwide)) +
+  # add geometry
+  geom_line()
+
+# show plot
+p_coast
+```
+
+# For plotting a trend line with two continuous variables
+
+```{r}
+p_coast + 
+  geom_smooth(method = "lm")
+```
+
+# For plotting the distributions of a single continuous variable
+
+```{r}
+d_coast %>% 
+  # setup aesthetics
+  ggplot(aes(x = total_fisheries_revenue_coastwide)) +
+  # add geometry
+  geom_histogram()
+```
+
+# For plotting series with grouping variables
+
+## Line plots
+```{r}
+library(stringr) # For enhanced string manipulation
+library(tidyr)
+
+d_rgn <- d_ac %>% 
+  # select columns
+  select(
+    time, 
+    starts_with("total_fisheries_revenue")) %>% 
+  # exclude column
+  select(-total_fisheries_revenue_coastwide) %>% 
+  # pivot to longer format
+  pivot_longer(-time) %>% 
+  # mutate region by stripping other
+  mutate(
+    region = name %>% 
+      str_replace("total_fisheries_revenue_", "") %>% 
+      str_to_upper()) %>% 
+  # filter for not NA
+  filter(!is.na(value)) %>% 
+  # select columns
+  select(time, region, value)
+  
+# create plot object
+p_rgn <- ggplot(
+  d_rgn,
+  # aesthetics
+  aes(
+    x     = time, 
+    y     = value,
+    group = region,
+    color = region)) +
+  # geometry
+  geom_line()
+
+# show plot
+p_rgn
+
+# Update labels
+p_rgn <- p_rgn +
+  labs(
+    title  = "Fisheries Revenue",
+    x      = "Year",
+    y      = "Millions $ (year 2015)",
+    color  = "Region")
+p_rgn
+
+# Multiple pltos with facet_wrap
+p_rgn +
+  facet_wrap(vars(region))
+```
+## Bar plots
+```{r}
+# Use geom_bar for discrete x data and geom_col for discrete x and continuous y data
+
+library(glue) # for string manipulation
+library(lubridate)
+
+yr_max <- year(max(d_rgn$time))
+
+d_rgn %>% 
+  # filter by most recent time
+  filter(year(time) == yr_max) %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_col() +
+  # add labels
+  labs(
+    title  = glue("Fisheries Revenue for {yr_max}"),
+    x      = "Region",
+    y      = "Millions $ (year 2015)",
+    fill   = "Region")
+
+```
+## Boxplots
+```{r}
+d_rgn %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_boxplot() +
+  # add labels
+  labs(
+    title  = "Fisheries Revenue Variability",
+    x      = "Region",
+    y      = "Millions $ (year 2015)") +
+  # drop legend since redundant with x axis
+  theme(
+    legend.position = "none")
+```
+
+## Violin plots
+```{r}
+p_rgn_violin <- d_rgn %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_violin() +
+  # add labels
+  labs(
+    title  = "Fisheries Revenue Variability",
+    x      = "Region",
+    y      = "Millions $ (year 2015)") +
+  # drop legend since redundant with x axis
+  theme(
+    legend.position = "none")
+p_rgn_violin
+```
+
+# For changing themes
+
+```{r}
+p_rgn_violin +
+  theme_classic()
+```
+
+# For producing interactive plots
+
+## Using `plotly`
+```{r}
+plotly::ggplotly(p_rgn)
+```
+
+## Using `dygraphs` for time series
+```{r}
+library(dygraphs)
+
+# dygraphs requires data in wide format:
+d_rgn_wide <- d_rgn %>% 
+  mutate(
+    Year = year(time)) %>% 
+  select(Year, region, value) %>% 
+  pivot_wider(
+    names_from  = region,
+    values_from = value)
+datatable(d_rgn_wide)
+
+d_rgn_wide %>% 
+  dygraph() %>% 
+  dyRangeSelector()
+```
+
